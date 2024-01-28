@@ -1,3 +1,5 @@
+package main
+
 /*
 ** name: wbk (waybackurls)
 ** cred: https://github.com/tomnomnom/hacks/tree/master/waybackurls
@@ -33,112 +35,152 @@ inputs
 
 */
 
-
-package main
-
 import (
-    "encoding/json"
-    "flag"
-    "fmt"
-    "io/ioutil"
-    "net/http"
-    "os"
-    "strings"
+	"bufio"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"os"
+	"strings"
 )
 
-
-const (
-	Version      = "v0.1 (beta)"
-	FetchCDXBase = "http://web.archive.org/cdx/search/cdx?url=*.%s/*&output=json&fl=original&collapse=urlkey"
-)
+const VERSION = "v0.1 (beta)"
+const fetchCDX = "http://web.archive.org/cdx/search/cdx?url=*.%s/*&output=json&fl=original&collapse=urlkey"
 
 var (
-	fromToFlag  = flag.String("fromto", "", "results filtered by timestamp using from= and to= params\nE.g: -fromto \"2012-2015\"")
-	filterFlag  = flag.String("filter", "", "filter:\n\tmimetype:\tE.g: mimetype:application/json\n\tstatuscode:\tE.g: statuscode:200\nE.g: -filter \"mimetype:application/json\"")
-	matchFlag   = flag.String("match", "", "exact\n\tprefix\n\thost\n\tdomain")
-	versionFlag = flag.Bool("version", false, "show version and exit\n\nDoc link: https://bit.ly/2UCEIyH")
+	_fromto  = flag.String("fromto", "", "\nresults filtered by timestamp using from= and to= params\nE.g:\n-fromto \"2012-2015\"\n")
+	_filter  = flag.String("filter", "", "\nfilter:\n\tmimetype:\tE.g: mimetype:application/json\n\tstatuscode:\tE.g: statuscode:200\nE.g:\n-filter \"mimetype:application/json\"\n")
+	_match   = flag.String("match", "", "\n\texact\n\tprefix\n\thost\n\tdomain\n")
+	_version = flag.Bool("version", false, "show version and exit\n\nDoc link: https://bit.ly/2UCEIyH\n")
 )
 
 func main() {
+	// main
+	var domains []string
+
+	var targets []string
+
+	matchTypies := map[string]bool{
+		"exact":  true,
+		"prefix": true,
+		"host":   true,
+		"domain": true,
+	}
+
+	filterTypies := map[string]bool{
+		"statuscode":  true,
+		"mimetype":    true,
+		"!statuscode": true,
+		"!mimetype":   true,
+		"digest":      true,
+		"!digest":     true,
+	}
+
+	fetchCDXS := ""
 	flag.Parse()
 
-	if *versionFlag {
-		fmt.Println("WBK version:", Version)
-		return
+	filter := *_filter
+	fromto := *_fromto
+	match := *_match
+
+	if *_version {
+		fmt.Fprint(os.Stdout, "WBK version: ", VERSION, "\n")
+		os.Exit(0)
 	}
 
-	if flag.NArg() < 1 {
-		fmt.Println("Usage: wbk [options] <domain>")
-		flag.PrintDefaults()
-		return
+	if flag.NArg() > 0 {
+
+		domains = []string{flag.Arg(0)}
+		_, b := os.Stat(domains[0])
+
+		if b != nil {
+			targets = domains
+		} else /* read file */ {
+			file, err := os.Open(domains[0])
+			if err != nil {
+				fmt.Fprint(os.Stderr, "Error: ", err, "\n")
+			}
+			read_file := bufio.NewScanner(file)
+			for read_file.Scan() {
+				targets = append(targets, read_file.Text())
+			}
+
+		}
+	} else /* read from stdin */ {
+		stdin_input := bufio.NewScanner(os.Stdin)
+		for stdin_input.Scan() {
+			targets = append(targets, stdin_input.Text())
+		}
+		if err := stdin_input.Err(); err != nil {
+			fmt.Fprint(os.Stderr, "", err, "\n")
+		}
 	}
 
-	domain := flag.Arg(0)
+	fetchCDXS = fetchCDX
 
-	fetchCDX := buildFetchCDXURL(domain)
-
-	urls, err := fetchURLs(fetchCDX)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to fetch URLs for domain %s: %v\n", domain, err)
-		return
+	if strings.Contains(fromto, "-") {
+		fetchCDXS = fetchCDXS + "&from=" + strings.Split(fromto, "-")[0] + "&to=" + strings.Split(fromto, "-")[1]
 	}
-
-	for _, url := range urls {
-		fmt.Println(url)
-	}
-}
-
-func buildFetchCDXURL(domain string) string {
-	fetchCDX := FetchCDXBase
-
-	if strings.Contains(*fromToFlag, "-") {
-		fetchCDX += "&from=" + strings.Split(*fromToFlag, "-")[0] + "&to=" + strings.Split(*fromToFlag, "-")[1]
-	}
-
-	if *filterFlag != "" {
-		filters := strings.Split(*filterFlag, ",")
+	if filter != "" {
+		filters := strings.Split(filter, ",")
+		params := ""
 		for _, v := range filters {
-			filter := strings.Split(v, ":")[0]
-			if filter == "statuscode" || filter == "mimetype" || filter == "!statuscode" || filter == "!mimetype" {
-				fetchCDX += "&filter=" + v
+			if filterTypies[strings.Split(v, ":")[0]] {
+				params = params + "&filter=" + v
 			}
 		}
+		fetchCDXS = fetchCDXS + params
 	}
 
-	if *matchFlag != "" {
-		fetchCDX += "&matchType=" + *matchFlag
+	if matchTypies[match] {
+		fetchCDXS = fetchCDXS + "&matchType=" + match
 	}
 
-	return fmt.Sprintf(fetchCDX, domain)
-}
+	for _, domain := range targets {
+		urls, err := getContent(fetchCDXS, domain)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to fetch URLs\n")
+			continue
+		}
 
-func fetchURLs(fetchCDX string) ([]string, error) {
-	response, err := http.Get(fetchCDX)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", response.StatusCode)
-	}
-
-	body, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var urls [][]string
-	if err := json.Unmarshal(body, &urls); err != nil {
-		return nil, err
-	}
-
-	var result []string
-	for _, url := range urls {
-		if len(url) > 0 {
-			result = append(result, url[0])
+		for _, url := range urls {
+			fmt.Println(url)
 		}
 	}
 
-	return result, nil
+}
+
+func getContent(fetchCDXS string, domain string) ([]string, error) {
+	// get content
+	fetch := fmt.Sprintf(fetchCDXS, domain)
+	out := make([]string, 0)
+
+	res, err := http.Get(fetch)
+
+	if err != nil {
+		return out, err
+	}
+
+	raw, err := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+
+	if err != nil {
+		return out, err
+	}
+
+	var wrapper [][]string
+	err = json.Unmarshal(raw, &wrapper)
+	skip := true
+
+	for _, urls := range wrapper {
+		if skip {
+			skip = false
+			continue
+		}
+		out = append(out, urls...)
+	}
+
+	return out, nil
 }
