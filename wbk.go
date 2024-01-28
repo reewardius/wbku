@@ -1,3 +1,39 @@
+/*
+** name: wbk (waybackurls)
+** cred: https://github.com/tomnomnom/hacks/tree/master/waybackurls
+** docs: https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server#url-match-scope
+** m4ll0k (github.com/m4ll0k)
+
+DOC LINK: https://bit.ly/2UCEIyH
+
+main features compared to gau / waybackurls:
+
+filtring (https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server#filtering):
+  Date Range:
+  E.g:
+	  $ wbk -fromto "2010-2015" paypal.com
+
+  Regex filtering
+  E.g:
+	  $ wbk -filter "statuscode:200,mimetype:application/json" paypal.com     # show only urls with statuscode 200 and mimetype application/json
+	  $ wbk -filter "\!statuscode:200,\!mimetype:application/json" paypal.com # not show urls with statuscode 200 and mimetype application/json
+
+url match scope (https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server#url-match-scope)
+	E.g:
+	  $ wbk -match "exact" paypal.com/signin
+	  $ wbk -match "host"  paypal.com
+	  $ ...
+
+inputs
+	E.g:
+		$ cat mydomains.txt | wbk ... # stdin
+		$ wbk ... mydomains.txt       # file
+		$ wbk ... mydomain.com        # string
+
+
+*/
+
+
 package main
 
 import (
